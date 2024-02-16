@@ -27,6 +27,7 @@ import sys
 import os
 import pprint
 import re
+from collections import Counter
 def grabargs():
     parser = argparse.ArgumentParser(description='Test Grammar data set builder Analex.')
     # add file name to import and filename to export
@@ -129,6 +130,9 @@ class DataBuilder:
         self.lines = []
         self.data = []
         self.sep= sep
+        self.TAG_SEP  = " "
+        self.TAG_JOINER  = "+"
+        self.FIELDS_LENGTH  = 4
         self.tags= { 0: [ "اسم", "حرف", "فعل"],
     1: [
         "جار",
@@ -136,7 +140,7 @@ class DataBuilder:
         "خبر",
         "زمان",
         "صفة",
-        "ضمير",
+        # ~ "ضمير",
         "عطف",
         "فاعل",
         "فعل",
@@ -155,7 +159,7 @@ class DataBuilder:
         "خبر",
         "زمان",
         "صفة",
-        "ضمير",
+        # ~ "ضمير",
         "عطف",
         "فاعل",
         "ماضي",
@@ -252,15 +256,17 @@ class DataBuilder:
             lines = myfile.readlines()
             self.lines = lines
             return lines
+            
     def collect_all_tags(self, lines):
         """
         Check lines validity
         """
         for ln, line in enumerate(lines):
             # lines started with # are ignored
-            if not line.startswith("#"):
-                fields = line.strip().split(self.sep)
-                fields = [f.strip() for f in fields]
+            fields = self.extract_fields(line)
+            if fields:
+                # ~ fields = line.strip().split(self.sep)
+                # ~ fields = [f.strip() for f in fields]
                 # ~ fields = [f for f in fields if f]
                 self.collect_tags(fields)
         # make uniq all collected tags
@@ -276,35 +282,116 @@ class DataBuilder:
         """
         #if any fields is empty 
         for i, f in enumerate(fields[1:]):
-            tags = f.split(" ")
-            simple_tags = []
-            combined_tags = []
-            for tag in tags:
-                if not "+" in tag:
-                    simple_tags.append(tag)
-                else:
-                    # add combined tags into list
-                    combined_tags.append(tag)
-                    # add all parts of tags into simple
-                    parts = tag.split("+")
-                    simple_tags.extend(parts)
-                    
+            # ~ tags = f.split(" ")
+            # ~ simple_tags = []
+            # ~ combined_tags = []
+            # ~ for tag in tags:
+                # ~ if not "+" in tag:
+                    # ~ simple_tags.append(tag)
+                # ~ else:
+                    # ~ # add combined tags into list
+                    # ~ combined_tags.append(tag)
+                    # ~ # add all parts of tags into simple
+                    # ~ parts = tag.split("+")
+                    # ~ simple_tags.extend(parts)
+            tags = self.extract_tags(f)
+            simple_tags = tags.get("simple",[])
+            combined_tags = tags.get("combined",[])                   
             # add a key for collected tags
             if i not in self.collected_tags:
                 self.collected_tags[i] = []
                 self.combined_collected_tags[i] = []
             self.collected_tags[i].extend(simple_tags)
             self.combined_collected_tags[i].extend(combined_tags)
+
+    def count_quiz_by_tags(self, lines, simple_only=False):
+        """
+        Count Quiz by tags.
+        Simple_only: count only simple tags, used by default
+        """
+        collection_tags = {}
+        for fields in self.data:
+            # lines started with # are ignored
+            # ~ fields = self.extract_fields(line)
+            # ~ if fields: 
+                #if any fields is empty 
+            for i, f in enumerate(fields[1:]):
+                tags = self.extract_tags(f)
+                simple_tags = tags.get("simple",[])
+                combined_tags = tags.get("combined",[]) 
                         
+                # add a key for collection tags
+                if i not in collection_tags:
+                    collection_tags[i] = []
+                # add all tags once to collection tags
+                # to count quiz by tags
+                collection_tags[i].extend(list(set(simple_tags)))
+                # count only simple
+                if not simple_only:
+                    collection_tags[i].extend(list(set(combined_tags)))
+        # Build counts
+        counts = {i:Counter(collection_tags[i]) for i in collection_tags}
+        return counts
+        
+    def format_counts(self, counts, output=''):
+        """
+        Format counts as output
+        """
+        if  output.lower() =="csv":
+            text = "\t".join(["level", "tag", "Freq"])
+            for k in counts:
+                for tag in counts[k]:
+                    text += "\n"+"\t".join([str(k), tag, str(counts[k][tag])])
+            return text
+        else:
+            return counts        
+        
+    def extract_tags(self,field):
+        """
+        Extract Simple and combined tags,
+        return a dict of lists.
+        """
+        simple_tags = []
+        combined_tags = []
+
+        tags = field.split(self.TAG_SEP)
+        tags = [t for t in tags if t]
+                
+        for tag in tags:
+
+            if not self.TAG_JOINER in tag:
+                simple_tags.append(tag)
+            else:
+                # add combined tags into list
+                combined_tags.append(tag)
+                # add all parts of tags into simple
+                parts = tag.split(self.TAG_JOINER)
+                simple_tags.extend(parts)
+        return {"simple": simple_tags,
+            "combined":combined_tags,
+        }
+        
+    def extract_fields(self,line):
+        """
+        Extract fields from line, 
+        managed by number of fields 
+        """
+        if line.startswith("#"):
+            return []
+        else:
+            fields  = line.strip().split(self.sep)
+            fields = [f.strip() for f in fields]         
+            fields = fields[:self.FIELDS_LENGTH]
+        return fields
+        
     def check_lines(self, lines):
         """
         Check lines validity
         """
         for ln, line in enumerate(lines):
             # lines started with # are ignored
-            if not line.startswith("#"):
-                fields = line.strip().split(self.sep)
-                fields = [f.strip() for f in fields]
+            fields = self.extract_fields(line)
+            if fields:
                 result = self.check(fields)
                 if result < 0:
                     # result is an error code
@@ -392,18 +479,18 @@ class DataBuilder:
         """
         """
         # problem in combined tags, exist in one tag and not exists in he other.
-        if ("+" in tag1 and "+" not in tag2) or ("+" not in tag1 and "+" in tag2):
+        if (self.TAG_JOINER in tag1 and self.TAG_JOINER not in tag2) or (self.TAG_JOINER not in tag1 and self.TAG_JOINER in tag2):
             print("y", tag1, tag2)
             return False
         # if no combined tag
-        elif "+" not in tag1:
+        elif self.TAG_JOINER not in tag1:
             if tag2 not in self.sub_tags.get(tag1, []):
                 print("x", tag2, tag1)
                 return False
         # if combined tag
         else:
-            subtags1 = tag1.split("+")
-            subtags2 = tag2.split("+")
+            subtags1 = tag1.split(self.TAG_JOINER)
+            subtags2 = tag2.split(self.TAG_JOINER)
             for st1, st2 in zip(subtags1, subtags2):
                 if st2 not in self.sub_tags.get(st1, []):
                     message = "[%s][%s] sub[%s] not in [%s]"%(subtags1, subtags2, st2, st1)
@@ -436,6 +523,7 @@ class DataBuilder:
             words = [w for w in phrase.split(" ") if w]
             ln = len(words)
             if len(fields) >= 2 and len(words)<=4 and fields[1]:
+            # ~ if len(fields) >= 2 and len(words)<=4 and fields[1]:
                 dic["small"].append({"sentence":fields[0], "answer":fields[1]})
             if len(fields) >= 3 and fields[2]:
                 dic["medium"].append({"sentence":fields[0], "answer":fields[2]})
@@ -472,17 +560,25 @@ def main(args):
     pprint.pprint(builder.collected_tags)
     print("Combined Colleted Tags")
     pprint.pprint(builder.combined_collected_tags)
-    print(builder.data)
+ 
     
     # check valid lines
     builder.check_lines(lines)
     builder.build()
+    print("-----------DATA----------")
+    print(builder.data)
+    print("----END-------DATA----------")   
     # ~ print(builder.dic)
+    # reduce small cases:
+    builder.dic["small"] = builder.dic["small"][:100]
     builder.jsonfy()
     print("Small", len(builder.dic["small"]))
     print("medium",len(builder.dic["medium"]))
     print("large", len(builder.dic["medium"]))
-
+    print(" Counts by fields and tags")
+    counts = builder.count_quiz_by_tags(lines, simple_only=True)
+    print(builder.format_counts(counts, "csv"))
+    print(counts)
   
 
 
